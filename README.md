@@ -96,50 +96,273 @@ The API runs at `http://localhost:3000`.
 ## Approval Rules & Design Decisions
 
 ### Rule 1: Manager approves direct reports
-Straightforward — the system checks `reporting_manager_id` to verify authority.
+
+Straightforward — the system checks `reporting_manager_id` to verify authority. In `approveLeave()`, the approver must be:
+- The employee's direct manager (`requestor.reporting_manager_id === approverId`), OR
+- A delegated approver via the delegation chain (`current_manager_approver_id === approverId`), OR
+- HR acting in the manager role for escalated cases
+
+If none of these match → `"You are not authorized to approve this leave request"`.
 
 ### Rule 2: Dual approval for >3 consecutive days
-When `consecutiveDays > 3`, both the manager AND HR must approve. The request starts as `pending`, and after one approval moves to `partially_approved`. Either one can reject at any time — rejection is immediate and final.
 
-**Why "either can reject"?** The assignment says "either one can reject." I interpret this as a veto model — if either authority sees a problem, the request is denied. This is safer than requiring consensus to reject.
+When `consecutiveDays > 3`, both the manager AND HR must approve. The state machine is:
+
+```
+pending → (first approval) → partially_approved → (second approval) → approved
+                                    ↓ (either rejects)
+                                 rejected
+```
+
+In `createLeaveRequest()`:
+```typescript
+const numConsecutive = consecutiveDays(startDate, endDate);
+const requiresDualApproval = numConsecutive > 3;
+const hrApproval = requiresDualApproval ? 'pending' : 'not_required';
+```
+
+In `approveLeave()`, after recording the approval, the system checks:
+```typescript
+const managerDone = updated.manager_approval === 'approved';
+const hrDone = updated.hr_approval === 'approved' || updated.hr_approval === 'not_required';
+
+if (managerDone && hrDone) {
+  finalStatus = 'approved';        // Both done → fully approved
+} else {
+  finalStatus = 'partially_approved'; // One done, waiting for other
+}
+```
+
+**Why "either can reject"?** This is a veto model — if either authority sees a problem, the request is denied immediately. In `rejectLeave()`, regardless of who rejects, the status goes straight to `'rejected'`. No second opinion needed.
 
 ### Rule 3: 30% team capacity warning
-The system calculates projected on-leave count per date. If approving would put >30% of the department on leave on any date, the request is **flagged** with `team_capacity_warning = true`. The approver sees the warning but can still approve.
 
-**Conflict with Rule 2:** If a >3-day request also triggers the 30% warning, both rules apply independently. The dual approval still occurs, and both approvers see the capacity warning.
+The system calculates projected on-leave count **per date** across every business day in the range. In `createLeaveRequest()`:
+
+```typescript
+const capacityCheck = await availabilityService.checkTeamCapacity(
+  employee.department, employee.id, startDate, endDate, teamSize
+);
+
+if (capacityCheck.wouldBreach) {
+  warnings.push(`⚠ Team capacity warning: ...${worstDay.percentage}% of ${employee.department}...`);
+}
+```
+
+The request is **flagged** with `team_capacity_warning = true` but never auto-rejected. When a manager or HR views their pending approvals, the warning is surfaced:
+
+```typescript
+if (lr.team_capacity_warning) warnings.push('⚠ This request would breach 30% team capacity threshold.');
+```
+
+The approver decides. No override flag needed — it's purely advisory.
 
 ### Rule 4: Sick leave document requirement
-Sick leave of ≥3 consecutive days enters `pending_document` status with a **72-hour deadline**.
-- **Reminder at 24h before deadline** (first reminder)
-- **Urgent reminder at 12h** (second reminder)
-- **Auto-reject when deadline passes**
-- Once document is uploaded → status moves to `pending` (normal approval flow)
 
-**Conflict with Rule 2:** If sick leave is also >3 days (triggering dual-approval), the document must be uploaded first. Only then does the request enter the approval flow. This prevents approvers from wasting time reviewing incomplete requests.
+Sick leave of ≥3 consecutive days enters `pending_document` status with a **72-hour deadline**:
+
+```typescript
+if (dto.leave_type === 'sick' && numConsecutive >= 3) {
+  status = 'pending_document';
+  documentDeadline = new Date();
+  documentDeadline.setDate(documentDeadline.getDate() + 3); // 72 hours
+}
+```
+
+**Scheduled job (runs every hour)** handles reminders and auto-rejection:
+- **24h before deadline** → first reminder notification
+- **12h before deadline** → urgent reminder notification
+- **Deadline passes** → auto-reject with reason `"Auto-rejected: medical document not uploaded within deadline (3 days)"`
+
+Once a document is uploaded via `POST /:id/document`:
+```typescript
+// status moves from pending_document → pending (enters normal approval flow)
+await client.query(
+  `UPDATE leave_requests SET medical_document_url = $2, status = 'pending', ...`,
+  [leaveRequestId, documentUrl]
+);
+```
 
 **Design choice on timing:** 3 days is generous enough for genuine illness but short enough to prevent gaming.
 
 ### Rule 5: Manager self-leave escalation
-A manager's leave goes to their `reporting_manager_id`. If no one above them → HR acts as the manager-role approver.
 
-**Conflict with Rule 2:** If a manager requests >3 days, their manager approves (manager role) AND HR approves (HR role). If the manager has no one above them, HR fills both roles — in this case, a single HR approval suffices since they're acting in both capacities.
+A manager cannot approve their own leave. The system first prevents it:
+```typescript
+if (approverId === leaveRequest.employee_id) {
+  throw new Error('Cannot approve your own leave request');
+}
+```
+
+Then, on creation, the approver is determined via `getApproverFor()`:
+- If the manager has a `reporting_manager_id` → that person is the manager-role approver
+- If no one above them → HR acts as the manager-role approver
+
+In `approveLeave()`, the key logic that lets HR fill the "manager" slot:
+```typescript
+const hrActsAsManager =
+  (requestor.role === 'manager' || requestor.role === 'hr') &&
+  (requestor.reporting_manager_id === approverId || requestor.reporting_manager_id === null);
+
+if ((hrActsAsManager || hrIsDelegatedApprover) && leaveRequest.manager_approval === 'pending') {
+  roleType = 'manager';  // HR fills the manager-role slot
+} else {
+  roleType = 'hr';       // HR fills the HR-role slot
+}
+```
 
 ### Rule 6: Blackout period warnings
-Leave during a blackout period gets `blackout_warning = true`. To approve, the approver must explicitly set `blackout_override = true`. Without the override, the API rejects the approval attempt.
 
-**Conflict with Rule 3:** Both warnings can appear simultaneously. They're independent flags — the approver sees both and must consciously decide.
+Leave during a blackout period gets `blackout_warning = true`. The warning is set at creation time:
 
-**Conflict with Rule 2:** In dual approval with blackout, EITHER approver can set the override. Only one override is needed (stored on the request).
+```typescript
+const blackoutConflicts = await blackoutService.checkBlackoutConflict(
+  employee.department, startDate, endDate
+);
+if (blackoutConflicts.length > 0) {
+  blackoutWarning = true;
+  warnings.push(`⚠ Blackout period: "${bp.name}" ...Approver must explicitly override.`);
+}
+```
+
+At approval time, the override is **required** or the approval is rejected:
+```typescript
+if (leaveRequest.blackout_warning && !blackoutOverride) {
+  throw new Error('This leave falls during a blackout period. Set blackout_override=true to explicitly approve.');
+}
+```
+
+The `blackout_override` flag is stored on the request row when an approver provides it.
+
+---
+
+## How Rule Conflicts Are Handled
+
+The six rules aren't independent — they interact when multiple conditions are true simultaneously. Here's how every conflict is resolved:
+
+### Conflict 1: >3-Day Sick Leave (Rule 4 × Rule 2)
+
+**Scenario:** Employee requests 5 days of sick leave.
+
+**Problem:** Rule 4 says "needs document first." Rule 2 says "needs dual approval." Which comes first?
+
+**Resolution:** Rule 4 gates **submission**, Rule 2 gates **approval**. They run sequentially:
+
+```
+CREATE → pending_document (Rule 4 blocks approval flow)
+         ↓ (employee uploads document)
+         pending → manager approves → partially_approved → HR approves → approved
+                                       (Rule 2 dual approval)
+```
+
+In code, `createLeaveRequest()` sets `status = 'pending_document'` AND `requires_dual_approval = true` simultaneously. But since `approveLeave()` requires status to be `'pending'` or `'partially_approved'`, no one can approve until the document is uploaded. This prevents approvers from wasting time reviewing incomplete requests.
+
+### Conflict 2: >3-Day Leave + 30% Team Breach (Rule 2 × Rule 3)
+
+**Scenario:** Employee requests 5 days, and the team already has people out on those dates.
+
+**Resolution:** Both rules apply independently — they don't interfere.
+
+- `requires_dual_approval = true` (Rule 2) → both manager and HR must approve
+- `team_capacity_warning = true` (Rule 3) → both approvers see the warning
+
+When a manager or HR queries their pending queue, both warnings are surfaced:
+```typescript
+if (lr.team_capacity_warning) warnings.push('⚠ ...30% team capacity threshold.');
+if (lr.blackout_warning) warnings.push('⚠ ...blackout period...');
+```
+
+Rule 3 is purely advisory — it never blocks. Rule 2 is structural — it determines *who* needs to approve.
+
+### Conflict 3: Manager Self-Leave + >3 Days (Rule 5 × Rule 2)
+
+**Scenario:** A manager requests >3 consecutive days. Rule 5 says it escalates up. Rule 2 says both manager-role AND HR-role must approve.
+
+**Resolution: Two sub-cases:**
+
+**Case A — Manager has a boss:**
+The manager's boss fills the "manager" role, HR fills the "HR" role → standard dual approval with two different people.
+
+**Case B — Manager has no boss (top of reporting chain):**
+HR fills **both** roles. The HR person can approve twice:
+
+1. **First approval:** `manager_approval` is `'pending'` → the `hrActsAsManager` check is true → `roleType = 'manager'` → status becomes `partially_approved`
+2. **Second approval:** `manager_approval` is now `'approved'`, so the condition `leaveRequest.manager_approval === 'pending'` is false → `roleType = 'hr'` → status becomes `approved`
+
+For a manager with no boss requesting **≤3 days** (`hr_approval = 'not_required'`): A single HR approval fills the manager slot, and since `hrDone` is already `true` (not_required), the request is immediately `approved` in one step.
+
+### Conflict 4: Blackout + 30% Breach (Rule 6 × Rule 3)
+
+**Scenario:** Leave during a blackout period that would also breach 30% capacity.
+
+**Resolution:** Both flags are set independently at creation time:
+
+```typescript
+team_capacity_warning = true   // Rule 3 — advisory
+blackout_warning = true        // Rule 6 — requires override
+```
+
+At approval time:
+- **Capacity warning** is informational — approver sees it but isn't blocked
+- **Blackout warning** requires `blackout_override: true` in the request body, or the approval is rejected
+
+The approver sees both warnings and must consciously decide on the blackout. Capacity is shown for context but doesn't gate anything.
+
+### Conflict 5: Blackout + Dual Approval (Rule 6 × Rule 2)
+
+**Scenario:** A >3-day leave falls during a blackout period. Both manager and HR need to approve.
+
+**Resolution:** Each approver independently acknowledges the blackout.
+
+The `blackout_override` check runs for **every** approval call:
+```typescript
+if (leaveRequest.blackout_warning && !blackoutOverride) {
+  throw new Error('...Set blackout_override=true to explicitly approve.');
+}
+```
+
+So both the manager and HR must pass `blackout_override: true` in their respective approval requests. This is intentional — each approver independently acknowledges the risk. You don't want one person's override to silently greenlight it for the other.
+
+### Conflict 6: Sick Leave + Blackout + Dual Approval (Rule 4 × Rule 6 × Rule 2)
+
+**The triple conflict.** A 5-day sick leave during a Finance month-end blackout.
+
+**Resolution:** The rules compose cleanly because they operate at **different stages**:
+
+```
+Stage 1 — CREATION:
+  • Rule 4: status = 'pending_document' (blocks approvals)
+  • Rule 2: requires_dual_approval = true (stored for later)
+  • Rule 6: blackout_warning = true (stored for later)
+  • Rule 3: team_capacity_warning = true/false (stored for later)
+
+Stage 2 — DOCUMENT UPLOAD:
+  • Rule 4: status moves to 'pending' (unlocks approval flow)
+
+Stage 3 — FIRST APPROVAL (manager):
+  • Rule 6: must pass blackout_override=true
+  • Rule 2: status → 'partially_approved' (waiting for HR)
+  • Rule 3: capacity warning shown (advisory)
+
+Stage 4 — SECOND APPROVAL (HR):
+  • Rule 6: must pass blackout_override=true (independently)
+  • Rule 2: status → 'approved' (both done)
+  • Rule 3: capacity warning shown (advisory)
+```
+
+No special "triple conflict" code path exists. Each rule is a composable layer that checks its own condition at its own stage.
 
 ### Rule Conflict Summary
 
-| Scenario | Resolution |
-|----------|-----------|
-| >3 days sick leave | Document required FIRST, then dual approval kicks in |
-| >3 days + 30% breach | Dual approval + capacity warning shown to both approvers |
-| Blackout + 30% breach | Both warnings shown; approver must override blackout explicitly |
-| Manager self-leave + >3 days | Escalated manager approves + HR approves |
-| Manager self-leave + no boss | HR acts as sole approver (both manager and HR role) |
+| Conflict | Rules | Resolution |
+|----------|-------|-----------|
+| >3 days sick leave | R4 × R2 | Document required FIRST, then dual approval kicks in |
+| >3 days + 30% breach | R2 × R3 | Dual approval + capacity warning shown to both approvers |
+| Manager self-leave + >3 days | R5 × R2 | Escalated manager approves (manager role) + HR approves (HR role) |
+| Manager self-leave + no boss | R5 × R2 | HR fills both roles — can approve twice (once as manager, once as HR) |
+| Blackout + 30% breach | R6 × R3 | Both warnings shown; blackout requires override, capacity is advisory |
+| Blackout + dual approval | R6 × R2 | Each approver independently passes `blackout_override: true` |
+| Sick + blackout + dual | R4 × R6 × R2 | Document → pending → each approval checks blackout override independently |
 
 ---
 

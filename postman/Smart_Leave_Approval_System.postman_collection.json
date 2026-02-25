@@ -1,0 +1,1589 @@
+{
+	"info": {
+		"_postman_id": "smart-leave-approval-system",
+		"name": "Smart Leave Approval System",
+		"description": "Complete API collection for the Smart Leave Approval System.\n\nSeeded employees:\n- ID 1: Priya Sharma (HR)\n- ID 2: Rajesh Kumar (Manager, Engineering)\n- ID 3: Anita Desai (Manager, Finance)\n- ID 4: Vikram Patel (Manager, Marketing)\n- IDs 5-8: Engineering employees (report to Rajesh)\n- IDs 9-12: Finance employees (report to Anita)\n- IDs 13-16: Marketing employees (report to Vikram)\n\nRun the requests in the numbered folder order to walk through all 6 approval rules, delegation, and the audit log.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "leaveId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "sickLeaveId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "dualApprovalLeaveId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "blackoutLeaveId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "managerLeaveId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "cancelLeaveId",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "0. Health & Setup",
+			"item": [
+				{
+					"name": "Health Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Status is ok', () => {",
+									"  const json = pm.response.json();",
+									"  pm.expect(json.status).to.eql('ok');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/health",
+							"host": ["{{baseUrl}}"],
+							"path": ["health"]
+						},
+						"description": "Verify the server is running."
+					}
+				}
+			]
+		},
+		{
+			"name": "1. Employees",
+			"item": [
+				{
+					"name": "List All Employees",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Returns array of employees', () => {",
+									"  const json = pm.response.json();",
+									"  pm.expect(json.success).to.be.true;",
+									"  pm.expect(json.data).to.be.an('array');",
+									"  pm.expect(json.data.length).to.be.at.least(16);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/employees",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "employees"]
+						}
+					}
+				},
+				{
+					"name": "Get Employee by ID",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Returns Rajesh (manager)', () => {",
+									"  const json = pm.response.json();",
+									"  pm.expect(json.data.name).to.eql('Rajesh Kumar');",
+									"  pm.expect(json.data.role).to.eql('manager');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/employees/2",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "employees", "2"]
+						},
+						"description": "Get manager Rajesh Kumar (ID 2)."
+					}
+				},
+				{
+					"name": "Get Direct Reports",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Rajesh has 4 direct reports', () => {",
+									"  const json = pm.response.json();",
+									"  pm.expect(json.data).to.be.an('array');",
+									"  pm.expect(json.data.length).to.eql(4);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/employees/2/reports",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "employees", "2", "reports"]
+						},
+						"description": "Get Rajesh's direct reports (should be 4 Engineering employees)."
+					}
+				},
+				{
+					"name": "Get Leave Balances",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Has casual, sick, earned balances', () => {",
+									"  const json = pm.response.json();",
+									"  pm.expect(json.data).to.be.an('array');",
+									"  const types = json.data.map(b => b.leave_type);",
+									"  pm.expect(types).to.include.members(['casual', 'sick', 'earned']);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/employees/5/balances?year=2026",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "employees", "5", "balances"],
+							"query": [{ "key": "year", "value": "2026" }]
+						},
+						"description": "Get leave balances for employee 5 in 2026."
+					}
+				}
+			]
+		},
+		{
+			"name": "2. Blackout Periods",
+			"item": [
+				{
+					"name": "List Blackouts (Finance)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Returns Finance blackout periods', () => {",
+									"  const json = pm.response.json();",
+									"  pm.expect(json.data).to.be.an('array');",
+									"  pm.expect(json.data.length).to.be.at.least(1);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/blackout-periods?department=Finance",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "blackout-periods"],
+							"query": [{ "key": "department", "value": "Finance" }]
+						}
+					}
+				},
+				{
+					"name": "Create Blackout Period",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"pm.test('Created blackout period', () => {",
+									"  const json = pm.response.json();",
+									"  pm.expect(json.success).to.be.true;",
+									"  pm.expect(json.data.name).to.eql('Test Freeze');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"department\": \"Engineering\",\n  \"name\": \"Test Freeze\",\n  \"start_date\": \"2026-12-20\",\n  \"end_date\": \"2026-12-31\",\n  \"reason\": \"Year-end code freeze\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/blackout-periods",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "blackout-periods"]
+						}
+					}
+				},
+				{
+					"name": "Delete Blackout Period",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Deleted', () => {",
+									"  pm.expect(pm.response.json().success).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/blackout-periods/6",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "blackout-periods", "6"]
+						},
+						"description": "Delete the blackout period created above (adjust ID if needed)."
+					}
+				}
+			]
+		},
+		{
+			"name": "3. Rule 1 — Manager Approves Direct Report",
+			"item": [
+				{
+					"name": "Create Casual Leave (2 days)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"const json = pm.response.json();",
+									"pm.test('Status is pending', () => pm.expect(json.data.status).to.eql('pending'));",
+									"pm.test('No dual approval needed', () => pm.expect(json.data.requires_dual_approval).to.be.false);",
+									"pm.collectionVariables.set('leaveId', json.data.id);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 5,\n  \"leave_type\": \"casual\",\n  \"start_date\": \"2026-07-06\",\n  \"end_date\": \"2026-07-07\",\n  \"reason\": \"Personal work\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						},
+						"description": "Employee 5 (Engineering) requests 2-day casual leave. Manager only approval."
+					}
+				},
+				{
+					"name": "Manager Approves",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const json = pm.response.json();",
+									"pm.test('Fully approved', () => pm.expect(json.data.status).to.eql('approved'));",
+									"pm.test('Message confirms full approval', () => pm.expect(json.message).to.include('fully approved'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 2\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{leaveId}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{leaveId}}", "approve"]
+						},
+						"description": "Rajesh (manager ID 2) approves."
+					}
+				},
+				{
+					"name": "Verify Status Log — Created + Approved",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const json = pm.response.json();",
+									"pm.test('Has 2 log entries', () => pm.expect(json.data.length).to.eql(2));",
+									"pm.test('First entry is creation', () => {",
+									"  pm.expect(json.data[0].old_status).to.eql('(created)');",
+									"  pm.expect(json.data[0].new_status).to.eql('pending');",
+									"});",
+									"pm.test('Second entry is approval', () => {",
+									"  pm.expect(json.data[1].old_status).to.eql('pending');",
+									"  pm.expect(json.data[1].new_status).to.eql('approved');",
+									"  pm.expect(json.data[1].changed_by_id).to.eql(2);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{leaveId}}/status-log",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{leaveId}}", "status-log"]
+						},
+						"description": "Verify the immutable audit log captured both the creation and approval."
+					}
+				},
+				{
+					"name": "Verify Balance Deducted",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Casual balance used_days increased', () => {",
+									"  const casual = pm.response.json().data.find(b => b.leave_type === 'casual');",
+									"  pm.expect(casual.used_days).to.be.at.least(2);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/employees/5/balances?year=2026",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "employees", "5", "balances"],
+							"query": [{ "key": "year", "value": "2026" }]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "4. Rule 2 — Dual Approval (>3 consecutive days)",
+			"item": [
+				{
+					"name": "Create 5-Day Leave (triggers dual approval)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"const json = pm.response.json();",
+									"pm.test('Requires dual approval', () => pm.expect(json.data.requires_dual_approval).to.be.true);",
+									"pm.test('Manager pending, HR pending', () => {",
+									"  pm.expect(json.data.manager_approval).to.eql('pending');",
+									"  pm.expect(json.data.hr_approval).to.eql('pending');",
+									"});",
+									"pm.collectionVariables.set('dualApprovalLeaveId', json.data.id);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 6,\n  \"leave_type\": \"earned\",\n  \"start_date\": \"2026-08-03\",\n  \"end_date\": \"2026-08-07\",\n  \"reason\": \"Family vacation\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						},
+						"description": "Employee 6 requests 5 consecutive business days → requires both manager and HR approval."
+					}
+				},
+				{
+					"name": "Manager Approves (partial)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const json = pm.response.json();",
+									"pm.test('Status is partially_approved', () => pm.expect(json.data.status).to.eql('partially_approved'));",
+									"pm.test('Manager approved, HR still pending', () => {",
+									"  pm.expect(json.data.manager_approval).to.eql('approved');",
+									"  pm.expect(json.data.hr_approval).to.eql('pending');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 2\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{dualApprovalLeaveId}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{dualApprovalLeaveId}}", "approve"]
+						}
+					}
+				},
+				{
+					"name": "HR Approves (fully approved)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const json = pm.response.json();",
+									"pm.test('Fully approved', () => pm.expect(json.data.status).to.eql('approved'));",
+									"pm.test('Both approvals complete', () => {",
+									"  pm.expect(json.data.manager_approval).to.eql('approved');",
+									"  pm.expect(json.data.hr_approval).to.eql('approved');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 1\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{dualApprovalLeaveId}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{dualApprovalLeaveId}}", "approve"]
+						},
+						"description": "Priya (HR, ID 1) gives the second approval."
+					}
+				},
+				{
+					"name": "Status Log — Dual Approval Trail",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const json = pm.response.json();",
+									"pm.test('Has 3 entries (created + partial + approved)', () => {",
+									"  pm.expect(json.data.length).to.eql(3);",
+									"});",
+									"pm.test('Transitions: pending → partially_approved → approved', () => {",
+									"  pm.expect(json.data[1].new_status).to.eql('partially_approved');",
+									"  pm.expect(json.data[2].new_status).to.eql('approved');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{dualApprovalLeaveId}}/status-log",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{dualApprovalLeaveId}}", "status-log"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "5. Rule 3 — 30% Team Capacity Warning",
+			"item": [
+				{
+					"name": "Create Leave #1 (Employee 7)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"pm.test('No capacity warning yet', () => {",
+									"  pm.expect(pm.response.json().data.team_capacity_warning).to.be.false;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 7,\n  \"leave_type\": \"casual\",\n  \"start_date\": \"2026-09-14\",\n  \"end_date\": \"2026-09-14\",\n  \"reason\": \"Capacity test 1\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						},
+						"description": "First leave on Sep 14. Engineering has 5 people (manager + 4). 1/5 = 20%, no warning."
+					}
+				},
+				{
+					"name": "Create Leave #2 (Employee 8) — triggers 30%",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"pm.test('Capacity warning triggered', () => {",
+									"  pm.expect(pm.response.json().data.team_capacity_warning).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 8,\n  \"leave_type\": \"casual\",\n  \"start_date\": \"2026-09-14\",\n  \"end_date\": \"2026-09-14\",\n  \"reason\": \"Capacity test 2\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						},
+						"description": "Second leave on same date. 2/5 = 40% → exceeds 30% threshold."
+					}
+				}
+			]
+		},
+		{
+			"name": "6. Rule 4 — Sick Leave Document Requirement",
+			"item": [
+				{
+					"name": "Create 3-Day Sick Leave (→ pending_document)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"const json = pm.response.json();",
+									"pm.test('Status is pending_document', () => pm.expect(json.data.status).to.eql('pending_document'));",
+									"pm.test('Has document deadline', () => pm.expect(json.data.document_deadline).to.not.be.null);",
+									"pm.collectionVariables.set('sickLeaveId', json.data.id);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 9,\n  \"leave_type\": \"sick\",\n  \"start_date\": \"2026-10-05\",\n  \"end_date\": \"2026-10-07\",\n  \"reason\": \"Flu\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						},
+						"description": "Employee 9 (Finance) requests 3-day sick leave. ≥3 consecutive days → pending_document."
+					}
+				},
+				{
+					"name": "Upload Medical Document (→ pending)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Status moved to pending', () => {",
+									"  pm.expect(pm.response.json().data.status).to.eql('pending');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 9,\n  \"document_url\": \"https://example.com/medical-cert-001.pdf\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{sickLeaveId}}/document",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{sickLeaveId}}", "document"]
+						}
+					}
+				},
+				{
+					"name": "Manager Approves Sick Leave",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Approved', () => pm.expect(pm.response.json().data.status).to.eql('approved'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 3\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{sickLeaveId}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{sickLeaveId}}", "approve"]
+						},
+						"description": "Anita (Finance manager, ID 3) approves after document uploaded."
+					}
+				},
+				{
+					"name": "Status Log — Sick Leave Full Trail",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const data = pm.response.json().data;",
+									"pm.test('Has 3+ entries', () => pm.expect(data.length).to.be.at.least(3));",
+									"pm.test('First status is pending_document', () => {",
+									"  pm.expect(data[0].new_status).to.eql('pending_document');",
+									"});",
+									"pm.test('Document upload transitions to pending', () => {",
+									"  const pendingEntry = data.find(e => e.new_status === 'pending');",
+									"  pm.expect(pendingEntry).to.not.be.undefined;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{sickLeaveId}}/status-log",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{sickLeaveId}}", "status-log"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "7. Rule 5 — Manager Self-Leave Escalation",
+			"item": [
+				{
+					"name": "Manager Requests Leave (escalated to HR)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"const json = pm.response.json();",
+									"pm.test('Status is pending', () => pm.expect(json.data.status).to.eql('pending'));",
+									"pm.collectionVariables.set('managerLeaveId', json.data.id);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 4,\n  \"leave_type\": \"casual\",\n  \"start_date\": \"2026-11-02\",\n  \"end_date\": \"2026-11-03\",\n  \"reason\": \"Manager taking leave\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						},
+						"description": "Vikram (Marketing manager, ID 4) requests leave. His reporting_manager is HR (Priya)."
+					}
+				},
+				{
+					"name": "HR Approves Manager Leave",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Approved', () => pm.expect(pm.response.json().data.status).to.eql('approved'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 1\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{managerLeaveId}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{managerLeaveId}}", "approve"]
+						},
+						"description": "Priya (HR, ID 1) approves Vikram's leave."
+					}
+				}
+			]
+		},
+		{
+			"name": "8. Rule 6 — Blackout Period Warning",
+			"item": [
+				{
+					"name": "Create Leave During Blackout",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"const json = pm.response.json();",
+									"pm.test('Blackout warning flagged', () => pm.expect(json.data.blackout_warning).to.be.true);",
+									"pm.test('Has warning message', () => {",
+									"  pm.expect(json.warnings).to.be.an('array');",
+									"  pm.expect(json.warnings.length).to.be.at.least(1);",
+									"});",
+									"pm.collectionVariables.set('blackoutLeaveId', json.data.id);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 9,\n  \"leave_type\": \"casual\",\n  \"start_date\": \"2026-03-30\",\n  \"end_date\": \"2026-03-31\",\n  \"reason\": \"Need during month-end\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						},
+						"description": "Finance employee requests leave during month-end blackout (seeded blackout for Finance)."
+					}
+				},
+				{
+					"name": "Approve Without Override — FAILS",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 400 — override required', () => pm.response.to.have.status(400));",
+									"pm.test('Error mentions blackout override', () => {",
+									"  pm.expect(pm.response.json().message.toLowerCase()).to.include('blackout');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 3\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{blackoutLeaveId}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{blackoutLeaveId}}", "approve"]
+						},
+						"description": "Manager tries to approve without blackout_override → should fail."
+					}
+				},
+				{
+					"name": "Approve With Blackout Override — OK",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Approved with override', () => {",
+									"  const json = pm.response.json();",
+									"  pm.expect(json.data.status).to.eql('approved');",
+									"  pm.expect(json.data.blackout_override).to.be.true;",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 3,\n  \"blackout_override\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{blackoutLeaveId}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{blackoutLeaveId}}", "approve"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "9. Rejection & Cancellation",
+			"item": [
+				{
+					"name": "Create Leave to Reject",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"pm.collectionVariables.set('cancelLeaveId', pm.response.json().data.id);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 13,\n  \"leave_type\": \"casual\",\n  \"start_date\": \"2026-09-21\",\n  \"end_date\": \"2026-09-22\",\n  \"reason\": \"Rejection test\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						}
+					}
+				},
+				{
+					"name": "Manager Rejects",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Status is rejected', () => {",
+									"  pm.expect(pm.response.json().data.status).to.eql('rejected');",
+									"});",
+									"pm.test('Rejection reason recorded', () => {",
+									"  pm.expect(pm.response.json().data.rejection_reason).to.eql('Deadline conflict');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 4,\n  \"reason\": \"Deadline conflict\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{cancelLeaveId}}/reject",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{cancelLeaveId}}", "reject"]
+						},
+						"description": "Vikram (Marketing manager, ID 4) rejects with a reason."
+					}
+				},
+				{
+					"name": "Create Leave to Cancel",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"pm.collectionVariables.set('cancelLeaveId', pm.response.json().data.id);"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 14,\n  \"leave_type\": \"casual\",\n  \"start_date\": \"2026-10-12\",\n  \"end_date\": \"2026-10-13\",\n  \"reason\": \"Cancel test\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						}
+					}
+				},
+				{
+					"name": "Employee Cancels Leave",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Status is cancelled', () => {",
+									"  pm.expect(pm.response.json().data.status).to.eql('cancelled');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 14\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{cancelLeaveId}}/cancel",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{cancelLeaveId}}", "cancel"]
+						}
+					}
+				},
+				{
+					"name": "Status Log — Rejection + Cancellation",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"const data = pm.response.json().data;",
+									"pm.test('Final status is cancelled', () => {",
+									"  pm.expect(data[data.length - 1].new_status).to.eql('cancelled');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{cancelLeaveId}}/status-log",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{cancelLeaveId}}", "status-log"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "10. Delegation Chain",
+			"item": [
+				{
+					"name": "Put Manager on Leave First",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 2,\n  \"leave_type\": \"casual\",\n  \"start_date\": \"2026-12-01\",\n  \"end_date\": \"2026-12-05\",\n  \"reason\": \"Manager vacation\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						},
+						"description": "Rajesh (Engineering manager) takes leave Dec 1-5."
+					}
+				},
+				{
+					"name": "Approve Manager Leave (via HR)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Approved', () => pm.expect(pm.response.json().data.status).to.eql('approved'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 1\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{cancelLeaveId}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{cancelLeaveId}}", "approve"]
+						},
+						"description": "NOTE: Replace {{cancelLeaveId}} with the actual ID from the previous step if needed. HR approves Rajesh's leave."
+					}
+				},
+				{
+					"name": "Employee Leave (auto-delegates to HR)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 201', () => pm.response.to.have.status(201));",
+									"const json = pm.response.json();",
+									"pm.test('Current approver is NOT the direct manager', () => {",
+									"  // Manager Rajesh (2) is on leave, should delegate to HR (1)",
+									"  pm.expect(json.data.current_manager_approver_id).to.not.eql(2);",
+									"});",
+									"pm.test('Has delegation warning', () => {",
+									"  if (json.warnings) {",
+									"    const delegationWarning = json.warnings.find(w => w.toLowerCase().includes('delegat'));",
+									"    pm.expect(delegationWarning).to.not.be.undefined;",
+									"  }",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 5,\n  \"leave_type\": \"casual\",\n  \"start_date\": \"2026-12-02\",\n  \"end_date\": \"2026-12-03\",\n  \"reason\": \"Delegation test — manager on leave\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						},
+						"description": "Employee 5's manager (Rajesh, ID 2) is on approved leave Dec 1-5. Approval should auto-delegate up the chain."
+					}
+				},
+				{
+					"name": "View Delegation History",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Has delegation entries', () => {",
+									"  pm.expect(pm.response.json().data).to.be.an('array');",
+									"  pm.expect(pm.response.json().data.length).to.be.at.least(1);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{cancelLeaveId}}/delegation-history",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{cancelLeaveId}}", "delegation-history"]
+						},
+						"description": "NOTE: Replace {{cancelLeaveId}} with the delegation-test leave ID."
+					}
+				}
+			]
+		},
+		{
+			"name": "11. Pending Approvals & Notifications",
+			"item": [
+				{
+					"name": "Pending Approvals for Manager",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Returns array', () => {",
+									"  pm.expect(pm.response.json().data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/pending/manager/2",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "pending", "manager", "2"]
+						},
+						"description": "Get all pending approvals assigned to Rajesh (manager ID 2)."
+					}
+				},
+				{
+					"name": "Pending Approvals for HR",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Returns array', () => {",
+									"  pm.expect(pm.response.json().data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/pending/hr",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "pending", "hr"]
+						}
+					}
+				},
+				{
+					"name": "Get Notifications (all)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Returns notifications array', () => {",
+									"  pm.expect(pm.response.json().data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/notifications/5",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "notifications", "5"]
+						},
+						"description": "All notifications for employee 5."
+					}
+				},
+				{
+					"name": "Get Unread Notifications",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('All notifications are unread', () => {",
+									"  const data = pm.response.json().data;",
+									"  data.forEach(n => pm.expect(n.is_read).to.be.false);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/notifications/5?unread=true",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "notifications", "5"],
+							"query": [{ "key": "unread", "value": "true" }]
+						}
+					}
+				},
+				{
+					"name": "Mark Notification Read",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Marked as read', () => {",
+									"  pm.expect(pm.response.json().message).to.include('read');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PATCH",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/notifications/1/read",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "notifications", "1", "read"]
+						},
+						"description": "Mark notification ID 1 as read."
+					}
+				}
+			]
+		},
+		{
+			"name": "12. Error Cases",
+			"item": [
+				{
+					"name": "Missing Required Fields",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 400', () => pm.response.to.have.status(400));",
+									"pm.test('Error message mentions required fields', () => {",
+									"  pm.expect(pm.response.json().message).to.include('Required');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 5\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						},
+						"description": "Missing leave_type, start_date, end_date."
+					}
+				},
+				{
+					"name": "Invalid Leave Type",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 400', () => pm.response.to.have.status(400));",
+									"pm.test('Error about leave_type', () => {",
+									"  pm.expect(pm.response.json().message).to.include('leave_type');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": 5,\n  \"leave_type\": \"vacation\",\n  \"start_date\": \"2026-07-01\",\n  \"end_date\": \"2026-07-02\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves"]
+						}
+					}
+				},
+				{
+					"name": "Unauthorized Approver",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 400', () => pm.response.to.have.status(400));",
+									"pm.test('Not authorized', () => {",
+									"  pm.expect(pm.response.json().message.toLowerCase()).to.include('not authorized');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 3\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{leaveId}}/approve",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{leaveId}}", "approve"]
+						},
+						"description": "Anita (Finance manager, ID 3) tries to approve an Engineering employee's leave — unauthorized."
+					}
+				},
+				{
+					"name": "Leave Not Found",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 404', () => pm.response.to.have.status(404));",
+									"pm.test('Not found', () => {",
+									"  pm.expect(pm.response.json().message).to.include('not found');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/99999",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "99999"]
+						}
+					}
+				},
+				{
+					"name": "Reject Without Reason",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 400', () => pm.response.to.have.status(400));",
+									"pm.test('Reason required', () => {",
+									"  pm.expect(pm.response.json().message).to.include('reason');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{ "key": "Content-Type", "value": "application/json" }],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_id\": 2\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{leaveId}}/reject",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{leaveId}}", "reject"]
+						},
+						"description": "Missing reason field."
+					}
+				},
+				{
+					"name": "Blackout — Missing department param",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 400', () => pm.response.to.have.status(400));",
+									"pm.test('Department required', () => {",
+									"  pm.expect(pm.response.json().message).to.include('department');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/blackout-periods",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "blackout-periods"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "13. Get Leave Details",
+			"item": [
+				{
+					"name": "Get Leave by ID",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Returns leave data', () => {",
+									"  const json = pm.response.json();",
+									"  pm.expect(json.success).to.be.true;",
+									"  pm.expect(json.data).to.have.property('id');",
+									"  pm.expect(json.data).to.have.property('status');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/{{leaveId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "{{leaveId}}"]
+						}
+					}
+				},
+				{
+					"name": "Get All Leaves for Employee",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status 200', () => pm.response.to.have.status(200));",
+									"pm.test('Returns array', () => {",
+									"  pm.expect(pm.response.json().data).to.be.an('array');",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/leaves/employee/5",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "leaves", "employee", "5"]
+						},
+						"description": "All leave requests by employee 5."
+					}
+				}
+			]
+		}
+	]
+}
