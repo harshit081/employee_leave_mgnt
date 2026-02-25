@@ -1,4 +1,4 @@
-import pool from '../config/database';
+import pool, { withActor } from '../config/database';
 import { LeaveRequest, CreateLeaveRequestDTO, Employee, LeaveEvent } from '../types';
 import * as balanceService from './balance.service';
 import * as employeeService from './employee.service';
@@ -307,10 +307,12 @@ export async function approveLeave(
     message = `Your approval recorded. Still waiting for ${pending} approval.`;
   }
 
-  await pool.query(
-    'UPDATE leave_requests SET status = $2, updated_at = NOW() WHERE id = $1',
-    [leaveRequestId, finalStatus]
-  );
+  await withActor(approverId, async (client) => {
+    await client.query(
+      'UPDATE leave_requests SET status = $2, updated_at = NOW() WHERE id = $1',
+      [leaveRequestId, finalStatus]
+    );
+  });
 
   const final = await getLeaveRequestById(leaveRequestId);
   if (!final) throw new Error('Leave request disappeared');
@@ -385,15 +387,17 @@ export async function rejectLeave(
   );
 
   // Either one can reject in dual-approval (Rule 2)
-  await pool.query(
-    `UPDATE leave_requests
-     SET status = 'rejected',
-         rejection_reason = $2,
-         ${roleType}_approval = 'rejected',
-         updated_at = NOW()
-     WHERE id = $1`,
-    [leaveRequestId, reason]
-  );
+  await withActor(approverId, async (client) => {
+    await client.query(
+      `UPDATE leave_requests
+       SET status = 'rejected',
+           rejection_reason = $2,
+           ${roleType}_approval = 'rejected',
+           updated_at = NOW()
+       WHERE id = $1`,
+      [leaveRequestId, reason]
+    );
+  });
 
   const final = await getLeaveRequestById(leaveRequestId);
   if (!final) throw new Error('Leave request disappeared');
@@ -422,10 +426,12 @@ export async function cancelLeave(leaveRequestId: number, employeeId: number): P
     throw new Error(`Cannot cancel a leave request with status "${leaveRequest.status}"`);
   }
 
-  await pool.query(
-    "UPDATE leave_requests SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
-    [leaveRequestId]
-  );
+  await withActor(employeeId, async (client) => {
+    await client.query(
+      "UPDATE leave_requests SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
+      [leaveRequestId]
+    );
+  });
 
   const final = await getLeaveRequestById(leaveRequestId);
   if (!final) throw new Error('Leave request disappeared');
@@ -458,12 +464,14 @@ export async function uploadMedicalDocument(
   }
 
   // Move to pending (for approval)
-  await pool.query(
-    `UPDATE leave_requests
-     SET medical_document_url = $2, status = 'pending', updated_at = NOW()
-     WHERE id = $1`,
-    [leaveRequestId, documentUrl]
-  );
+  await withActor(employeeId, async (client) => {
+    await client.query(
+      `UPDATE leave_requests
+       SET medical_document_url = $2, status = 'pending', updated_at = NOW()
+       WHERE id = $1`,
+      [leaveRequestId, documentUrl]
+    );
+  });
 
   const updated = await getLeaveRequestById(leaveRequestId);
   return updated!;

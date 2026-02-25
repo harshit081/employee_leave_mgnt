@@ -20,6 +20,9 @@ router.post('/:id/document', asyncHandler(LeaveController.uploadDocument));
 // Delegation history
 router.get('/:id/delegation-history', asyncHandler(LeaveController.getDelegationHistory));
 
+// Status audit log (append-only)
+router.get('/:id/status-log', asyncHandler(LeaveController.getStatusLog));
+
 // Pending approvals
 router.get('/pending/manager/:managerId', asyncHandler(LeaveController.getPendingApprovalsForManager));
 router.get('/pending/hr', asyncHandler(LeaveController.getPendingApprovalsForHR));

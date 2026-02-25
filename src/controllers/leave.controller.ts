@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import pool from '../config/database';
 import * as leaveService from '../services/leave.service';
 import * as notificationService from '../services/notification.service';
 import * as delegationService from '../services/delegation.service';
@@ -165,4 +166,15 @@ export async function getDelegationHistory(req: Request, res: Response) {
   const leaveRequestId = parseInt(req.params.id as string);
   const history = await delegationService.getDelegationHistory(leaveRequestId);
   res.json({ success: true, data: history });
+}
+
+// ─── Status Audit Log ────────────────────────────────────────────────────────
+
+export async function getStatusLog(req: Request, res: Response) {
+  const leaveRequestId = parseInt(req.params.id as string);
+  const { rows } = await pool.query(
+    'SELECT * FROM status_change_log WHERE leave_request_id = $1 ORDER BY changed_at ASC',
+    [leaveRequestId]
+  );
+  res.json({ success: true, data: rows });
 }

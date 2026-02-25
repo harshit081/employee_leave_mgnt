@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import pool from '../config/database';
+import pool, { withActor } from '../config/database';
 import * as notificationService from '../services/notification.service';
 import * as delegationService from '../services/delegation.service';
 
@@ -61,14 +61,16 @@ async function processDocumentDeadlines() {
 
       if (hoursUntilDeadline <= 0) {
         // ── Auto-reject: deadline passed ────────────────────────────────
-        await pool.query(
-          `UPDATE leave_requests
-           SET status = 'rejected',
-               rejection_reason = 'Auto-rejected: medical document not uploaded within deadline (3 days)',
-               updated_at = NOW()
-           WHERE id = $1`,
-          [lr.id]
-        );
+        await withActor(0, async (client) => {
+          await client.query(
+            `UPDATE leave_requests
+             SET status = 'rejected',
+                 rejection_reason = 'Auto-rejected: medical document not uploaded within deadline (3 days)',
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [lr.id]
+          );
+        });
 
         await notificationService.createNotification(
           lr.employee_id,

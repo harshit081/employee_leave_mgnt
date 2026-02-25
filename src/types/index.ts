@@ -149,6 +149,17 @@ export interface LeaveEvent {
   metadata?: Record<string, unknown>;
 }
 
+// ─── Status Audit Log ────────────────────────────────────────────────────────
+
+export interface StatusChangeLog {
+  id: number;
+  leave_request_id: number;
+  old_status: string | null;
+  new_status: string;
+  changed_by: number | null;   // null when no actor context (e.g. direct SQL)
+  changed_at: Date;
+}
+
 export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
