@@ -38,6 +38,7 @@ The API runs at `http://localhost:3000`.
 | `notifications` | All system notifications (approval, rejection, delegation, reminders, etc.) |
 | `team_availability` | Per-date per-department records of who is on leave |
 | `delegation_log` | Audit trail of approval delegation chain hops |
+| `status_change_log` | Append-only immutable audit log of every leave status change |
 
 ### Seeded Data
 - **HR**: Priya Sharma
@@ -69,6 +70,7 @@ The API runs at `http://localhost:3000`.
 | POST | `/api/leaves/:id/cancel` | Cancel a leave request |
 | POST | `/api/leaves/:id/document` | Upload medical document |
 | GET | `/api/leaves/:id/delegation-history` | View delegation chain audit trail |
+| GET | `/api/leaves/:id/status-log` | View immutable status change audit trail |
 
 ### Approvals
 | Method | Endpoint | Description |
@@ -190,6 +192,94 @@ Added to `leave_requests`:
 
 ---
 
+## Status Audit Log
+
+Every status change on a leave request is captured in an **append-only, immutable** audit trail. Nobody can edit or delete log entries — not even database admins.
+
+### How It Works
+
+```
+INSERT leave_request (status='pending') ──► log_status_on_insert trigger
+                                               │
+                                               ▼
+                                    status_change_log row:
+                                    old='(created)', new='pending',
+                                    changed_by=employee_id
+
+UPDATE status 'pending' → 'approved' ──► log_status_change trigger
+                                               │
+                                               ▼
+                                    status_change_log row:
+                                    old='pending', new='approved',
+                                    changed_by=approver_id
+```
+
+### Three-Layer Protection
+
+| Layer | Mechanism | What It Does |
+|-------|-----------|-------------|
+| **INSERT trigger** | `log_status_on_insert()` | Captures the initial status when a leave request is created |
+| **UPDATE trigger** | `log_status_change()` | Catches every `status` column change, recording old → new + who did it |
+| **Mutation-blocking trigger** | `prevent_log_mutation()` | Raises an exception on any `UPDATE` or `DELETE` against the log table |
+
+### Actor Tracking with `withActor()`
+
+The `withActor(actorId, fn)` helper wraps status-changing queries in a transaction that sets a PostgreSQL session variable:
+
+```sql
+BEGIN;
+SET LOCAL app.current_user_id = '2';   -- approver's ID
+UPDATE leave_requests SET status = 'approved' WHERE id = 1;
+COMMIT;
+```
+
+The trigger reads `current_setting('app.current_user_id', true)` to record who made the change. For system actions (e.g., auto-reject by cron), the actor is `0`.
+
+### Immutability Guarantee
+
+```sql
+-- Both of these FAIL with:
+-- ERROR: status_change_log is append-only. Updates and deletes are forbidden.
+UPDATE status_change_log SET new_status = 'hacked' WHERE id = 1;
+DELETE FROM status_change_log WHERE id = 1;
+```
+
+The only way to bypass this is to drop the trigger, which requires DDL privileges and is auditable at the infrastructure level.
+
+### API
+
+```
+GET /api/leaves/:id/status-log
+```
+
+Returns the full chronological audit trail:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "leave_request_id": 1,
+      "changed_by_id": 5,
+      "old_status": "(created)",
+      "new_status": "pending",
+      "changed_at": "2026-02-25T11:15:57.301Z"
+    },
+    {
+      "id": 2,
+      "leave_request_id": 1,
+      "changed_by_id": 2,
+      "old_status": "pending",
+      "new_status": "approved",
+      "changed_at": "2026-02-25T11:16:57.903Z"
+    }
+  ]
+}
+```
+
+---
+
 ## Fan-Out Architecture
 
 ### Design
@@ -251,7 +341,7 @@ To add a new downstream action (e.g., sync to Google Calendar on approval):
 ```
 src/
 ├── app.ts                          # Express setup, route mounting
-├── config/database.ts              # pg Pool config
+├── config/database.ts              # pg Pool config + withActor() helper
 ├── types/index.ts                  # All TypeScript interfaces & types
 ├── utils/helpers.ts                # Date math utilities
 ├── middleware/
@@ -285,7 +375,8 @@ src/
     └── scheduler.ts                # Cron jobs (document reminders)
 migrations/
 ├── 001_schema.sql                  # Full database schema
-└── 002_delegation_chain.sql        # Delegation chain columns + delegation_log table
+├── 002_delegation_chain.sql        # Delegation chain columns + delegation_log table
+└── 003_status_audit_log.sql        # Append-only status_change_log table + triggers
 ```
 
 ---
@@ -299,3 +390,5 @@ migrations/
 | Cron for reminders | Simpler than a separate worker process; `node-cron` runs in-process |
 | No auth middleware | Assignment says no frontend; IDs passed in body for simplicity |
 | fire-and-forget events | Approval response isn't blocked by notifications/balance updates |
+| DB triggers for audit | Guarantees logging even on direct SQL; impossible to skip at the app layer |
+| `SET LOCAL` for actor tracking | Transaction-scoped, safe for concurrent requests, no global state |
