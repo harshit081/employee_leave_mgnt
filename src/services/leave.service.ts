@@ -4,6 +4,7 @@ import * as balanceService from './balance.service';
 import * as employeeService from './employee.service';
 import * as blackoutService from './blackout.service';
 import * as availabilityService from './availability.service';
+import * as delegationService from './delegation.service';
 import { consecutiveDays, countBusinessDays } from '../utils/helpers';
 import { leaveEventBus } from '../events/emitter';
 
@@ -79,22 +80,45 @@ export async function createLeaveRequest(dto: CreateLeaveRequestDTO): Promise<{
   // ── Determine approval flow ─────────────────────────────────────────────
   const hrApproval = requiresDualApproval ? 'pending' : 'not_required';
 
+  // ── Determine the initial manager approver ─────────────────────────────
+  const { managerId: initialManagerId, needsHRAsManager } = await employeeService.getApproverFor(employee);
+  let managerApproverId: number | null = initialManagerId;
+  if (!managerApproverId && needsHRAsManager) {
+    const hrList = await employeeService.getHREmployees();
+    managerApproverId = hrList.length > 0 ? hrList[0]!.id : null;
+  }
+
   // ── Insert the leave request ────────────────────────────────────────────
   const result = await pool.query(
     `INSERT INTO leave_requests (
       employee_id, leave_type, start_date, end_date, reason, status,
       document_deadline, requires_dual_approval, manager_approval, hr_approval,
-      team_capacity_warning, blackout_warning
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10, $11)
+      team_capacity_warning, blackout_warning,
+      current_manager_approver_id, escalation_count, current_approver_assigned_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10, $11, $12, 0, NOW())
     RETURNING *`,
     [
       employee.id, dto.leave_type, dto.start_date, dto.end_date,
       dto.reason || null, status, documentDeadline, requiresDualApproval,
-      hrApproval, capacityCheck.wouldBreach, blackoutWarning
+      hrApproval, capacityCheck.wouldBreach, blackoutWarning,
+      managerApproverId
     ]
   );
 
-  const leaveRequest = result.rows[0] as LeaveRequest;
+  let leaveRequest = result.rows[0] as LeaveRequest;
+
+  // ── Delegation: check if approver is on leave → immediate escalation ───
+  if (managerApproverId && status !== 'pending_document') {
+    const delegation = await delegationService.delegateIfApproverUnavailable(
+      leaveRequest.id, managerApproverId, startDate, endDate
+    );
+    if (delegation.delegated) {
+      warnings.push(
+        `ℹ Your manager is currently on leave. Your request has been automatically routed to an alternate approver.`
+      );
+      leaveRequest = (await getLeaveRequestById(leaveRequest.id))!;
+    }
+  }
 
   // ── Emit event ──────────────────────────────────────────────────────────
   leaveEventBus.emitLeaveEvent({
@@ -125,15 +149,18 @@ export async function getPendingApprovalsForManager(managerId: number): Promise<
   // Get direct reports
   const reports = await employeeService.getDirectReports(managerId);
   const reportIds = reports.map(r => r.id);
-  if (reportIds.length === 0) return [];
 
+  // Include both direct-report requests AND requests delegated to this manager
   const result = await pool.query(
     `SELECT * FROM leave_requests
-     WHERE employee_id = ANY($1)
-       AND status IN ('pending', 'partially_approved')
+     WHERE status IN ('pending', 'partially_approved')
        AND manager_approval = 'pending'
+       AND (
+         employee_id = ANY($1)
+         OR current_manager_approver_id = $2
+       )
      ORDER BY created_at ASC`,
-    [reportIds]
+    [reportIds.length > 0 ? reportIds : [0], managerId]
   );
 
   // Attach warnings
@@ -212,8 +239,11 @@ export async function approveLeave(
       (requestor.role === 'manager' || requestor.role === 'hr') &&
       (requestor.reporting_manager_id === approverId || requestor.reporting_manager_id === null);
 
-    if (hrActsAsManager && leaveRequest.manager_approval === 'pending') {
-      // HR fulfills the manager-role approval for escalated requests
+    // Delegation chain: HR is the final fallback approver for delegation
+    const hrIsDelegatedApprover = leaveRequest.current_manager_approver_id === approverId;
+
+    if ((hrActsAsManager || hrIsDelegatedApprover) && leaveRequest.manager_approval === 'pending') {
+      // HR fulfills the manager-role approval for escalated or delegated requests
       roleType = 'manager';
     } else {
       roleType = 'hr';
@@ -223,8 +253,10 @@ export async function approveLeave(
     const isDirectManager = requestor.reporting_manager_id === approverId;
     // Rule 5: A manager's leave goes to their manager
     const isEscalatedManager = requestor.role === 'manager' && requestor.reporting_manager_id === approverId;
+    // Delegation chain: this person was delegated as the current approver
+    const isDelegatedApprover = leaveRequest.current_manager_approver_id === approverId;
 
-    if (!isDirectManager && !isEscalatedManager) {
+    if (!isDirectManager && !isEscalatedManager && !isDelegatedApprover) {
       throw new Error('You are not authorized to approve this leave request');
     }
     roleType = 'manager';
@@ -325,12 +357,21 @@ export async function rejectLeave(
       requestor &&
       (requestor.role === 'manager' || requestor.role === 'hr') &&
       (requestor.reporting_manager_id === approverId || requestor.reporting_manager_id === null);
-    if (hrActsAsManager && leaveRequest.manager_approval === 'pending') {
+    // Delegation chain: HR is the final fallback approver
+    const hrIsDelegatedApprover = leaveRequest.current_manager_approver_id === approverId;
+    if ((hrActsAsManager || hrIsDelegatedApprover) && leaveRequest.manager_approval === 'pending') {
       roleType = 'manager';
     } else {
       roleType = 'hr';
     }
   } else if (approver.role === 'manager') {
+    // Allow delegated approvers to reject
+    const isDelegatedApprover = leaveRequest.current_manager_approver_id === approverId;
+    const requestor = await employeeService.getEmployeeById(leaveRequest.employee_id);
+    const isDirectManager = requestor?.reporting_manager_id === approverId;
+    if (!isDirectManager && !isDelegatedApprover) {
+      throw new Error('You are not authorized to reject this leave request');
+    }
     roleType = 'manager';
   } else {
     throw new Error('Only managers and HR can reject leave requests');
@@ -434,52 +475,46 @@ export async function reassignPendingApprovals(managerId: number, startDate: Dat
   const manager = await employeeService.getEmployeeById(managerId);
   if (!manager) return 0;
 
-  // Find pending requests assigned to this manager that overlap with their leave dates
+  // Find pending requests where this manager is the current approver
   const result = await pool.query(
+    `SELECT lr.* FROM leave_requests lr
+     WHERE lr.current_manager_approver_id = $1
+       AND lr.status IN ('pending', 'partially_approved')
+       AND lr.manager_approval = 'pending'`,
+    [managerId]
+  );
+
+  // Also find requests from direct reports that don't yet have a current_manager_approver_id set
+  const fallback = await pool.query(
     `SELECT lr.* FROM leave_requests lr
      JOIN employees e ON lr.employee_id = e.id
      WHERE e.reporting_manager_id = $1
        AND lr.status IN ('pending', 'partially_approved')
        AND lr.manager_approval = 'pending'
-       AND lr.start_date <= $3
-       AND lr.end_date >= $2`,
-    [managerId, startDate, endDate]
+       AND lr.current_manager_approver_id IS NULL`,
+    [managerId]
   );
 
-  if (result.rows.length === 0) return 0;
+  const allRequests = [...result.rows, ...fallback.rows];
+  if (allRequests.length === 0) return 0;
 
-  // Find who to reassign to: the manager's own manager, or HR
-  const { managerId: escalatedMgrId, needsHRAsManager } = await employeeService.getApproverFor(manager);
-
-  let reassignToId: number;
-  if (escalatedMgrId) {
-    reassignToId = escalatedMgrId;
-  } else if (needsHRAsManager) {
-    const hrList = await employeeService.getHREmployees();
-    if (hrList.length === 0) {
-      console.warn(`No HR found to reassign approvals from manager #${managerId}`);
-      return 0;
-    }
-    reassignToId = hrList[0]!.id;
-  } else {
-    return 0;
-  }
-
-  // Reassign: update the reporting_manager_id for these employees temporarily?
-  // Actually, we should just note this in notifications. The approval logic checks
-  // reporting_manager_id, so we need the new approver to be recognized.
-  // For simplicity: we notify the new approver about these pending requests.
-  const { createNotification } = await import('./notification.service');
-  for (const lr of result.rows) {
-    await createNotification(
-      reassignToId,
-      'approval_reassigned',
-      `Leave request #${lr.id} needs your approval. Original approver (${manager.name}) is on leave.`,
-      lr.id
+  let delegated = 0;
+  for (const lr of allRequests) {
+    const delegationResult = await delegationService.findNextAvailableApprover(
+      managerId,
+      new Date(lr.start_date),
+      new Date(lr.end_date),
+      'on_leave',
+      lr.escalation_count || 0
     );
+
+    if (delegationResult) {
+      await delegationService.delegateApproval(lr.id, delegationResult);
+      delegated++;
+    }
   }
 
-  return result.rows.length;
+  return delegated;
 }
 
 // ─── Re-evaluate flagged requests (after cancellation frees capacity) ────────

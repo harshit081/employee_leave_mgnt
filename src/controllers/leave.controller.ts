@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import * as leaveService from '../services/leave.service';
 import * as notificationService from '../services/notification.service';
+import * as delegationService from '../services/delegation.service';
 
 // ─── Create Leave Request ────────────────────────────────────────────────────
 
@@ -156,4 +157,12 @@ export async function markNotificationRead(req: Request, res: Response) {
   const id = parseInt(req.params.id as string);
   await notificationService.markAsRead(id);
   res.json({ success: true, message: 'Notification marked as read' });
+}
+
+// ─── Delegation History ──────────────────────────────────────────────────────
+
+export async function getDelegationHistory(req: Request, res: Response) {
+  const leaveRequestId = parseInt(req.params.id as string);
+  const history = await delegationService.getDelegationHistory(leaveRequestId);
+  res.json({ success: true, data: history });
 }

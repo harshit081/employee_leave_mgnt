@@ -1,28 +1,31 @@
 import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
-import * as ctrl from '../controllers/leave.controller';
+import * as LeaveController from '../controllers/leave.controller';
 
 const router = Router();
 
 // Leave requests
-router.post('/', asyncHandler(ctrl.createLeaveRequest));
-router.get('/:id', asyncHandler(ctrl.getLeaveRequest));
-router.get('/employee/:employeeId', asyncHandler(ctrl.getMyLeaveRequests));
+router.post('/', asyncHandler(LeaveController.createLeaveRequest));
+router.get('/:id', asyncHandler(LeaveController.getLeaveRequest));
+router.get('/employee/:employeeId', asyncHandler(LeaveController.getMyLeaveRequests));
 
 // Approval / Rejection / Cancellation
-router.post('/:id/approve', asyncHandler(ctrl.approveLeave));
-router.post('/:id/reject', asyncHandler(ctrl.rejectLeave));
-router.post('/:id/cancel', asyncHandler(ctrl.cancelLeave));
+router.post('/:id/approve', asyncHandler(LeaveController.approveLeave));
+router.post('/:id/reject', asyncHandler(LeaveController.rejectLeave));
+router.post('/:id/cancel', asyncHandler(LeaveController.cancelLeave));
 
 // Medical document upload (Rule 4)
-router.post('/:id/document', asyncHandler(ctrl.uploadDocument));
+router.post('/:id/document', asyncHandler(LeaveController.uploadDocument));
+
+// Delegation history
+router.get('/:id/delegation-history', asyncHandler(LeaveController.getDelegationHistory));
 
 // Pending approvals
-router.get('/pending/manager/:managerId', asyncHandler(ctrl.getPendingApprovalsForManager));
-router.get('/pending/hr', asyncHandler(ctrl.getPendingApprovalsForHR));
+router.get('/pending/manager/:managerId', asyncHandler(LeaveController.getPendingApprovalsForManager));
+router.get('/pending/hr', asyncHandler(LeaveController.getPendingApprovalsForHR));
 
 // Notifications
-router.get('/notifications/:employeeId', asyncHandler(ctrl.getNotifications));
-router.patch('/notifications/:id/read', asyncHandler(ctrl.markNotificationRead));
+router.get('/notifications/:employeeId', asyncHandler(LeaveController.getNotifications));
+router.patch('/notifications/:id/read', asyncHandler(LeaveController.markNotificationRead));
 
 export default router;

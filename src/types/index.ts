@@ -51,6 +51,10 @@ export interface LeaveRequest {
   blackout_warning: boolean;
   blackout_override: boolean;
   rejection_reason: string | null;
+  // Delegation chain fields
+  current_manager_approver_id: number | null;
+  escalation_count: number;
+  current_approver_assigned_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -59,9 +63,18 @@ export interface ApprovalAction {
   id: number;
   leave_request_id: number;
   approver_id: number;
-  action: 'approved' | 'rejected' | 'overridden';
+  action: 'approved' | 'rejected' | 'overridden' | 'delegated';
   role_type: 'manager' | 'hr';
   comments: string | null;
+  created_at: Date;
+}
+
+export interface DelegationLog {
+  id: number;
+  leave_request_id: number;
+  from_approver_id: number;
+  to_approver_id: number;
+  reason: 'on_leave' | 'timeout_48h' | 'also_unavailable';
   created_at: Date;
 }
 

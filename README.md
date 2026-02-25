@@ -32,11 +32,12 @@ The API runs at `http://localhost:3000`.
 |---|---|
 | `employees` | Name, email, role (employee/manager/hr), department, reporting manager |
 | `leave_balances` | Per-employee per-year totals: 12 casual, 8 sick, 15 earned |
-| `leave_requests` | Leave applications with dual-approval tracking, warnings, status |
-| `approval_actions` | Audit trail of every approve/reject action |
+| `leave_requests` | Leave applications with dual-approval tracking, delegation chain, warnings, status |
+| `approval_actions` | Audit trail of every approve/reject/delegate action |
 | `blackout_periods` | Department-specific restricted periods |
-| `notifications` | All system notifications (approval, rejection, reminders, etc.) |
+| `notifications` | All system notifications (approval, rejection, delegation, reminders, etc.) |
 | `team_availability` | Per-date per-department records of who is on leave |
+| `delegation_log` | Audit trail of approval delegation chain hops |
 
 ### Seeded Data
 - **HR**: Priya Sharma
@@ -67,6 +68,7 @@ The API runs at `http://localhost:3000`.
 | POST | `/api/leaves/:id/reject` | Reject a leave request |
 | POST | `/api/leaves/:id/cancel` | Cancel a leave request |
 | POST | `/api/leaves/:id/document` | Upload medical document |
+| GET | `/api/leaves/:id/delegation-history` | View delegation chain audit trail |
 
 ### Approvals
 | Method | Endpoint | Description |
@@ -139,6 +141,55 @@ Leave during a blackout period gets `blackout_warning = true`. To approve, the a
 
 ---
 
+## Approval Delegation Chain (Option C)
+
+### How It Works
+
+When a leave request is created or while it's pending approval, the system checks if the assigned manager-approver is available:
+
+1. **On creation**: If the direct manager is on approved leave during the request dates, the approval is immediately delegated up the chain.
+2. **48-hour timeout**: A scheduled job runs every 30 minutes. If a request has been waiting for manager approval for >48 hours, it's automatically escalated to the next person up the chain.
+3. **Chain walking**: `current approver → their reporting_manager → their reporting_manager → ... → HR (final fallback)`
+
+### Loop Prevention
+
+| Mechanism | Description |
+|-----------|-------------|
+| Visited set | During chain traversal, a `Set<number>` tracks visited IDs. If we encounter someone already visited, the chain breaks. |
+| Escalation cap | Hard limit of 5 escalations per request (`escalation_count`). After 5 hops, no further delegation occurs. |
+| HR terminal node | HR is always the final stop. Chain walking never goes past HR. |
+
+### Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| Direct manager on leave | Immediate delegation on request creation |
+| Backup manager also on leave | Chain continues up to the next available person |
+| All managers unavailable | Falls back to HR as ultimate approver |
+| No HR in system | Delegation fails gracefully; stays with original approver |
+| Circular reporting chain | Loop detection breaks the cycle; falls back to HR |
+| 48h timeout + manager on leave | Escalates to next available person (may skip multiple levels) |
+
+### Audit Trail
+
+Every delegation hop is recorded in `delegation_log`:
+```
+| from_approver | to_approver | reason          |
+|---------------|-------------|------------------|
+| Rajesh Kumar  | Priya Sharma| on_leave         |
+```
+
+Additionally, `approval_actions` records each delegation with action `'delegated'` for full traceability.
+
+### Database Fields
+
+Added to `leave_requests`:
+- `current_manager_approver_id` — who currently needs to approve (may differ from reporting_manager_id)
+- `escalation_count` — how many times this request has been delegated
+- `current_approver_assigned_at` — when the current approver was assigned (used for 48h timeout)
+
+---
+
 ## Fan-Out Architecture
 
 ### Design
@@ -192,7 +243,7 @@ To add a new downstream action (e.g., sync to Google Calendar on approval):
 | Job | Frequency | Purpose |
 |-----|-----------|---------|
 | Document deadline check | Every hour | Sends reminders and auto-rejects expired pending_document requests |
-
+| Stale approval escalation | Every 30 min | Escalates requests where approver hasn't responded in 48 hours |
 ---
 
 ## Project Structure
@@ -210,6 +261,7 @@ src/
 │   ├── employee.service.ts         # Employee lookups, team queries
 │   ├── balance.service.ts          # Leave balance CRUD
 │   ├── leave.service.ts            # Core business logic (rules 1-6)
+│   ├── delegation.service.ts       # Approval delegation chain logic
 │   ├── blackout.service.ts         # Blackout period management
 │   ├── availability.service.ts     # Team capacity (30% rule)
 │   └── notification.service.ts     # Notification persistence
@@ -232,7 +284,8 @@ src/
 └── jobs/
     └── scheduler.ts                # Cron jobs (document reminders)
 migrations/
-└── 001_schema.sql                  # Full database schema
+├── 001_schema.sql                  # Full database schema
+└── 002_delegation_chain.sql        # Delegation chain columns + delegation_log table
 ```
 
 ---

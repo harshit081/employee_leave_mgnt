@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
-import * as ctrl from '../controllers/employee.controller';
+import * as EmployeeController from '../controllers/employee.controller';
 
 const router = Router();
 
-router.get('/', asyncHandler(ctrl.getAllEmployees));
-router.get('/:id', asyncHandler(ctrl.getEmployee));
-router.get('/:id/reports', asyncHandler(ctrl.getDirectReports));
-router.get('/:id/balances', asyncHandler(ctrl.getEmployeeBalances));
+router.get('/', asyncHandler(EmployeeController.getAllEmployees));
+router.get('/:id', asyncHandler(EmployeeController.getEmployee));
+router.get('/:id/reports', asyncHandler(EmployeeController.getDirectReports));
+router.get('/:id/balances', asyncHandler(EmployeeController.getEmployeeBalances));
 
 export default router;

@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { asyncHandler } from '../middleware/asyncHandler';
-import * as ctrl from '../controllers/blackout.controller';
+import * as BlackOutController from '../controllers/blackout.controller';
 
 const router = Router();
 
-router.get('/', asyncHandler(ctrl.getBlackoutPeriods));
-router.post('/', asyncHandler(ctrl.createBlackoutPeriod));
-router.delete('/:id', asyncHandler(ctrl.deleteBlackoutPeriod));
+router.get('/', asyncHandler(BlackOutController.getBlackoutPeriods));
+router.post('/', asyncHandler(BlackOutController.createBlackoutPeriod));
+router.delete('/:id', asyncHandler(BlackOutController.deleteBlackoutPeriod));
 
 export default router;

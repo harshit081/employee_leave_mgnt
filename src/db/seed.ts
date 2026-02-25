@@ -16,6 +16,7 @@ async function seed() {
     await client.query('BEGIN');
 
     // ── Clear existing data ──────────────────────────────────────────────────
+    await client.query('DELETE FROM delegation_log');
     await client.query('DELETE FROM team_availability');
     await client.query('DELETE FROM notifications');
     await client.query('DELETE FROM approval_actions');

@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import pool from '../config/database';
 import * as notificationService from '../services/notification.service';
+import * as delegationService from '../services/delegation.service';
 
 /**
  * Scheduled jobs for the leave management system.
@@ -11,17 +12,34 @@ import * as notificationService from '../services/notification.service';
  * - Reminder 2: sent at ≈12 hours before deadline.
  * - Auto-reject: when deadline passes.
  *
- * Runs every hour to check for pending documents.
+ * Delegation Chain — 48h stale approval escalation:
+ * - When a leave request's current approver hasn't responded within
+ *   48 hours, automatically delegate to the next person up the chain.
+ *
+ * Runs every hour for documents, every 30 min for stale approvals.
  */
 
 export function startScheduledJobs() {
-  // Run every hour
+  // Document deadline check — every hour
   cron.schedule('0 * * * *', async () => {
     console.log('[Scheduler] Running document deadline check...');
     await processDocumentDeadlines();
   });
 
-  console.log('[Scheduler] Scheduled jobs started (document deadline check every hour)');
+  // Stale approval escalation — every 30 minutes
+  cron.schedule('*/30 * * * *', async () => {
+    console.log('[Scheduler] Running stale approval escalation check...');
+    try {
+      const escalated = await delegationService.processStaleApprovals();
+      if (escalated > 0) {
+        console.log(`[Scheduler] Escalated ${escalated} stale approval(s)`);
+      }
+    } catch (err) {
+      console.error('[Scheduler] Error processing stale approvals:', err);
+    }
+  });
+
+  console.log('[Scheduler] Scheduled jobs started (document check hourly, stale approval check every 30min)');
 }
 
 async function processDocumentDeadlines() {
